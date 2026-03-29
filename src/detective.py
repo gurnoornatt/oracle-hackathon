@@ -22,9 +22,8 @@ from src.forensic_eye import (
     RegistryMatch,
     analyze_slab,
     compare_registry,
-    detect_redacted_cert,
     find_registry_match,
-    validate_is_slab,
+    validate_and_check_cert,
 )
 from scrapers.ebay_stealth import (
     EbayListing,
@@ -330,12 +329,10 @@ async def investigate_local(
     suspect_bytes = suspect_path.read_bytes()
     registry_bytes = registry_path.read_bytes()
 
-    # Gate: reject non-slab images (demo paths are trusted, but validate anyway)
-    if not await validate_is_slab(suspect_bytes):
+    # Stage 1: combined gate + cert check (1 Gemini call instead of 2)
+    is_slab, is_redacted = await validate_and_check_cert(suspect_bytes)
+    if not is_slab:
         return _NOT_SLAB_VERDICT
-
-    # Detect cert redaction first (determines which prompt to use)
-    is_redacted = await detect_redacted_cert(suspect_bytes)
 
     # Compare in a single Gemini call
     integrity = await compare_registry(
@@ -383,11 +380,13 @@ async def investigate_bytes(suspect_bytes: bytes) -> ForensicVerdict:
     Automatically finds the best matching registry file.
     Used by the /scan/image and /scan/url-image endpoints.
     """
-    # Gate: reject non-slab images before Gemini can hallucinate forensic data
-    if not await validate_is_slab(suspect_bytes):
+    # Stage 1: combined gate + cert check (1 Gemini call)
+    is_slab, is_redacted = await validate_and_check_cert(suspect_bytes)
+    if not is_slab:
         return _NOT_SLAB_VERDICT
 
-    registry_match = await find_registry_match(suspect_bytes)
+    # Stage 2: parallel registry comparisons (all files run simultaneously)
+    registry_match = await find_registry_match(suspect_bytes, is_redacted=is_redacted)
 
     if registry_match:
         integrity = registry_match.result

@@ -170,14 +170,13 @@ IMPORTANT: visual_id_suspect and visual_id_registry must each be a single plain 
 }"""
 
 
-_REDACTED_CHECK_PROMPT = """Look at this PSA or CGC graded card slab image.
-Is the certificate/serial number on the label obscured, blurred, cropped out, covered, or otherwise hidden?
-Respond with only one word: YES or NO."""
+_PRECHECK_PROMPT = """Look at this image and answer two questions:
+1. Is this a PSA or CGC graded trading card slab — a card sealed in a hard rectangular plastic case with a printed label?
+   Screenshots, logos, ungraded cards, and non-card images are NOT slabs.
+2. If it IS a slab: is the certificate/serial number on the label obscured, hidden, blurred, or cropped out?
 
-_IS_SLAB_PROMPT = """Does this image show a PSA or CGC graded trading card slab — the hard rectangular plastic case with a printed label?
-A valid slab image shows: a card sealed inside clear acrylic/plastic, with a PSA or CGC label visible.
-Screenshots, logos, generic photos, ungraded cards, and non-card images are NOT slabs.
-Respond with only one word: YES or NO."""
+Respond with exactly this format (no other text):
+IS_SLAB:YES|NO,CERT_HIDDEN:YES|NO"""
 
 
 # ---------------------------------------------------------------------------
@@ -199,41 +198,30 @@ async def analyze_slab(image_bytes: bytes, mime_type: str | None = None) -> str:
     return response.text.strip()
 
 
-async def validate_is_slab(image_bytes: bytes, mime_type: str | None = None) -> bool:
+async def validate_and_check_cert(
+    image_bytes: bytes, mime_type: str | None = None
+) -> tuple[bool, bool]:
     """
-    Gate check: is this actually a PSA/CGC graded card slab image?
-    Returns False for screenshots, ungraded cards, non-card photos, etc.
-    Prevents Gemini from hallucinating slab analysis on arbitrary images.
+    Single Gemini call that answers two questions at once:
+      - Is this actually a PSA/CGC graded card slab?
+      - Is the certificate number hidden/obscured?
+
+    Returns (is_slab, is_cert_redacted).
+    Replaces the previous two-call validate_is_slab + detect_redacted_cert pattern.
     """
     mime = mime_type or _detect_mime(image_bytes)
     client = _get_client()
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=[
-            _IS_SLAB_PROMPT,
+            _PRECHECK_PROMPT,
             types.Part.from_bytes(data=image_bytes, mime_type=mime),
         ],
     )
-    return response.text.strip().upper().startswith("YES")
-
-
-async def detect_redacted_cert(image_bytes: bytes, mime_type: str | None = None) -> bool:
-    """
-    Quick check: is the certificate number hidden/obscured in this slab photo?
-    Returns True if cert is redacted (itself a red flag).
-    """
-    mime = mime_type or _detect_mime(image_bytes)
-    client = _get_client()
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            _REDACTED_CHECK_PROMPT,
-            types.Part.from_bytes(data=image_bytes, mime_type=mime),
-        ],
-    )
-    answer = response.text.strip().upper()
-    return answer.startswith("YES")
+    text = response.text.strip().upper()
+    is_slab = "IS_SLAB:YES" in text
+    is_redacted = "CERT_HIDDEN:YES" in text
+    return is_slab, is_redacted
 
 
 async def compare_registry(
@@ -296,14 +284,21 @@ async def compare_registry(
 async def find_registry_match(
     suspect_bytes: bytes,
     registry_dir: Path | None = None,
+    is_redacted: bool | None = None,
 ) -> RegistryMatch | None:
     """
-    Compare suspect image against every PNG in registry_cache/.
+    Compare suspect image against every PNG in registry_cache/ IN PARALLEL.
     Returns the best match if any IntegrityResult.score > 70, else None.
+
+    Args:
+        is_redacted: Pre-computed from validate_and_check_cert — skips an extra
+                     Gemini call if already known.
 
     Filename convention: {cardname}_{certnumber}_official.png
     e.g. charizard_73606485_official.png  →  cert = "73606485"
     """
+    import asyncio
+
     if registry_dir is None:
         registry_dir = Path(__file__).parent.parent / "registry_cache"
 
@@ -311,18 +306,16 @@ async def find_registry_match(
     if not registry_files:
         return None
 
-    # Quick check: is the cert redacted on the suspect image?
     suspect_mime = _detect_mime(suspect_bytes)
-    is_redacted = await detect_redacted_cert(suspect_bytes, suspect_mime)
 
-    best: RegistryMatch | None = None
+    # Use pre-computed value if provided; otherwise detect now (single call)
+    if is_redacted is None:
+        _, is_redacted = await validate_and_check_cert(suspect_bytes, suspect_mime)
 
-    for registry_path in registry_files:
-        # Extract cert number from filename
-        # Pattern: anything_{certnumber}_official.png
+    # Compare against ALL registry files simultaneously
+    async def _compare_one(registry_path: Path) -> RegistryMatch:
         m = re.search(r'_(\d+)_official', registry_path.name)
         cert_number = m.group(1) if m else "unknown"
-
         registry_bytes = registry_path.read_bytes()
         result = await compare_registry(
             suspect_bytes=suspect_bytes,
@@ -331,15 +324,12 @@ async def find_registry_match(
             suspect_mime=suspect_mime,
             registry_mime=_detect_mime(registry_bytes),
         )
+        return RegistryMatch(cert_number=cert_number, registry_file=registry_path.name, result=result)
 
-        if best is None or result.score > best.result.score:
-            best = RegistryMatch(
-                cert_number=cert_number,
-                registry_file=registry_path.name,
-                result=result,
-            )
+    all_matches = await asyncio.gather(*[_compare_one(p) for p in registry_files])
 
-    # Only return a match if score crosses the threshold
+    best = max(all_matches, key=lambda r: r.result.score) if all_matches else None
+
     if best and best.result.score > 70:
         return best
     return None
