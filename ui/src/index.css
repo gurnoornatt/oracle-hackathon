@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* Card float during scan */
+@keyframes card-float {
+  0%,100% { transform: perspective(700px) rotateY(-3deg) rotateX(1.5deg) translateY(0); }
+  35%     { transform: perspective(700px) rotateY(3deg)  rotateX(-1deg)   translateY(-7px); }
+  65%     { transform: perspective(700px) rotateY(-1deg) rotateX(2.5deg)  translateY(-3px); }
+}
+
+/* Scan beam */
+@keyframes scan-down {
+  0%   { top: -5%;  opacity: 0; }
+  6%   { opacity: 0.85; }
+  94%  { opacity: 0.85; }
+  100% { top: 108%; opacity: 0; }
+}
+.scan-beam {
+  position: absolute; left: 0; right: 0; height: 52px;
+  background: linear-gradient(to bottom, transparent, rgba(124,58,237,0.2), transparent);
+  animation: scan-down 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Blink cursor */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.cursor { animation: blink 1s step-end infinite; }
+
+/* Ping */
+@keyframes ping { 75%,100% { transform: scale(2.2); opacity: 0; } }
+
+/* Drop zone hover */
+.drop-zone:hover { border-color: #7C3AED !important; }

@@ -1,0 +1,79 @@
+PRD: Visual Oracle (Forensic Image Guard)
+1. Executive Summary
+Goal: A specialized "Ghost Listing" and "Image Integrity" detector for TCG collectibles.
+Primary Problem: Scammers in 2026 bypass eBay’s $250+ Authenticity Guarantee by listing "Shadow Zone" cards ($100–$245) using stolen photos from past auctions or Japanese marketplaces (Mercari/Yahoo JP).
+Core Solution: An AI-driven agent that "fingerprints" the unique physical entropy of a graded slab (dust, scratches, label tilt) to verify if a listing photo is unique or a duplicate of an existing record.
+
+2. Target Market & Use Cases
+The Shadow Zone ($100–$245): Cards that ship directly to the buyer without eBay's physical inspection.
+
+Japanese Drop-shipping: Listings on eBay that scrape active photos from Mercari.jp/Yahoo Auctions Japan.
+
+Return Fraud Protection: Detecting when a buyer uses AI (Generative Fill) to add fake damage to a photo to force a refund.
+
+3. Technical Stack (2026 Standards)
+Orchestration: Python 3.12+ (managed via uv).
+
+Forensic Vision: Gemini 2.5 Flash (using 1M+ token context for microscopic detail).
+
+Stealth Browsing: Browserbase + Playwright (to bypass eBay/Mercari bot detection).
+
+Search Engine: Google Search Tool (for reverse-image "Visual Twin" detection).
+
+Database: ChromaDB (to store vector embeddings of "Image Fingerprints").
+
+4. Key Features & Logic Flows
+Feature 1: "Slab DNA" Fingerprinting
+Input: A listing URL or uploaded image.
+
+Logic: Gemini analyzes the image for three Micro-Markers:
+
+Internal Debris: Specific dust specks trapped inside the plastic during the sealing process.
+
+Label Physics: The exact angle and "tilt" of the paper label (PSA/CGC flips are rarely 100% level).
+
+Holo-Star Alignment: The position of holographic elements relative to the card's printed border.
+
+Output: A "Visual ID" hash that represents that exact physical object.
+
+Feature 2: Cross-Platform "Ghost" Detection
+Agent Flow:
+
+Scrape eBay listing for the PSA/CGC Certificate Number.
+
+If the number is hidden (like the Czech listing), perform a Reverse Image Search to find the original source.
+
+Check Mercari.jp and Yahoo Japan for the same Cert Number or Visual ID.
+
+Verdict: If the Japanese listing predates the eBay listing, flag as "HIGH RISK: DROP-SHIPPER/GHOST".
+
+Feature 3: Registry Comparison (The Truth)
+Logic: Fetch the official high-res scan from the PSA/CGC Registry.
+
+Comparison: Use Gemini to "overlay" the listing photo and the Registry photo.
+
+Red Flag: If the listing photo is a screenshot of the Registry photo (identifiable by UI elements or resolution loss), flag as "INVALID: NO PHYSICAL PROOF".
+
+5. Directory Structure for Claude Code
+Plaintext
+/visual_oracle
+├── .env                  # GEMINI_API_KEY, BROWSERBASE_API_KEY
+├── targets.json          # List of "Shadow Zone" cards to monitor
+├── /src
+│   ├── main.py           # FastAPI entry point
+│   ├── forensic_eye.py   # Gemini Vision prompting logic
+│   └── detective.py      # Cross-platform search orchestration
+├── /scrapers
+│   ├── ebay_stealth.py   # Browserbase-powered eBay crawler
+│   └── jp_source.py      # Mercari/Yahoo JP crawler
+├── /registry_cache       # Storage for "Source of Truth" PSA scans
+└── /test_images          # User-uploaded or scraped "Suspect" images
+6. Success Metrics (KPIs)
+False Positive Rate: < 2% (Legitimate home photos shouldn't be flagged as fakes).
+
+Detection Speed: Under 30 seconds from URL input to "Forensic Verdict."
+
+Shadow Zone Coverage: Successful detection of at least 90% of known Japanese drop-ship loops.
+
+7. The "Action" Prompt (For Claude Code)
+"Using the established visual_oracle structure, build the forensic_eye.py module. It must use the gemini-2.5-flash model to compare images in /registry_cache against /test_images. Focus the analysis on internal slab dust and label tilt to determine if the two images represent the same physical card. Output a JSON 'Integrity Score' from 0-100."
